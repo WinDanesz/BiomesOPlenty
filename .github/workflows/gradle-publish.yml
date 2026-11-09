@@ -1,0 +1,90 @@
+name: Publish
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [BOP-1.12.x-7.0.x]
+  push:
+    branches: [BOP-1.12.x-7.0.x]
+env:
+  # Only the real branch publishes. Pull requests and forks stop after the build.
+  PUBLISH: ${{ github.repository == 'Glitchfiend/BiomesOPlenty' && github.event_name != 'pull_request' && github.ref == 'refs/heads/BOP-1.12.x-7.0.x' }}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 0 # The version check compares every new commit
+    - name: Check version
+      run: sh .github/scripts/check-version.sh "$BASE_COMMIT"
+      env:
+        BASE_COMMIT: ${{ github.event.pull_request.base.sha || github.event.before }}
+    - name: Set up JDK 8
+      uses: actions/setup-java@v6
+      with:
+        java-version: '8'
+        distribution: 'temurin'
+    - name: Cache Gradle
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: gradle-${{ hashFiles('build.gradle', 'gradle/wrapper/gradle-wrapper.properties') }}
+    - name: Build
+      id: build
+      run: ./gradlew --no-daemon build
+    - name: Read version
+      id: version
+      if: env.PUBLISH == 'true'
+      run: |
+        mod_version="$(sed -n 's/^mod_version=//p' build.properties | tr -d '\r')"
+        build_number="$(sed -n 's/^build_number=//p' build.properties | tr -d '\r')"
+        echo "number=${mod_version}.${build_number}" >> "$GITHUB_OUTPUT"
+
+    # Each upload still runs if another fails, and any CurseForge or Modrinth failure fails the job.
+    - name: CurseForge Publish
+      id: curseforge
+      if: ${{ !cancelled() && env.PUBLISH == 'true' && steps.build.outcome == 'success' }}
+      uses: Kir-Antipov/mc-publish@c23376546a97f5ba7984e94445da359459b14419 # v3.3.2
+      with:
+        curseforge-id: 220318
+        curseforge-token: ${{ secrets.CURSE_API_KEY }}
+        files: build/libs/*-universal.jar
+        name: Biomes O' Plenty Forge ${{ steps.version.outputs.number }}
+        version: ${{ steps.version.outputs.number }}
+        version-type: beta
+        changelog-file: build/libs/*-changelog.txt
+        loaders: forge
+        environment: both
+        game-versions: 1.12.2
+        java: 8
+    - name: Modrinth Publish
+      id: modrinth
+      if: ${{ !cancelled() && env.PUBLISH == 'true' && steps.build.outcome == 'success' }}
+      uses: Kir-Antipov/mc-publish@c23376546a97f5ba7984e94445da359459b14419 # v3.3.2
+      with:
+        modrinth-id: biomes-o-plenty
+        modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+        modrinth-featured: false
+        modrinth-unfeature-mode: none
+        files: build/libs/*-universal.jar
+        name: ${{ steps.version.outputs.number }} for 1.12.2
+        version: ${{ steps.version.outputs.number }}
+        version-type: beta
+        changelog-file: build/libs/*-changelog.txt
+        loaders: forge
+        environment: both
+        game-versions: 1.12.2
+        java: 8
+    # Players get the mod from the two sites above, so a Maven problem only warns.
+    - name: Maven Publish
+      if: ${{ !cancelled() && env.PUBLISH == 'true' && steps.build.outcome == 'success' }}
+      run: ./gradlew --no-daemon uploadArchives
+      continue-on-error: true
+      env:
+        MAVEN_USER: ${{ secrets.MAVEN_USER }}
+        MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}

@@ -1,18 +1,14 @@
 buildscript {
     repositories {
-        jcenter()
+        mavenCentral()
         maven {
             name = "forge"
-            url = "http://files.minecraftforge.net/maven"
+            url = "https://maven.minecraftforge.net"
         }
     }
     dependencies {
         classpath 'net.minecraftforge.gradle:ForgeGradle:2.3-SNAPSHOT'
     }
-}
-
-plugins {
-    id "com.matthewprenger.cursegradle" version "1.0.9"
 }
 
 apply plugin: 'net.minecraftforge.gradle.forge'
@@ -33,10 +29,13 @@ group = "com.github.glitchfiend.biomesoplenty"
 version = config.mod_version
 archivesBaseName = "BiomesOPlenty"
 
-// add some stuff to the version
-version = "${config.minecraft_version}-${config.mod_version}.${System.getenv().BUILD_NUMBER}"
-// set this for the version.properties file, or was this broken on purpose?
-config.build_number = (System.getenv().BUILD_NUMBER) ? System.getenv().BUILD_NUMBER : ""
+// every commit raises build_number in build.properties
+def fullModVersion = "${config.mod_version}.${config.build_number}".toString()
+version = "${config.minecraft_version}-${fullModVersion}"
+
+// run tasks launch against forge_version itself, which can be older than the
+// floor shipped in release jars, so the floor is only applied to everything else
+def isDevRun = gradle.startParameter.taskNames.any { it.tokenize(':').last().startsWith('run') }
 
 minecraft {
     version = config.minecraft_version + "-" + config.forge_version // grab latest forge
@@ -45,9 +44,8 @@ minecraft {
     //gradle complains if this isn't set when setting up/using IDEA workspace
     runDir = "run"
     //set a full version string with appended build number to be used in mod registration
-    def buildnum = (config.build_number!="") ? '.' + config.build_number : ""
-    replace '@MOD_VERSION@', config.mod_version + buildnum
-    replace '1.0.0.0', config.forge_version
+    replace '@MOD_VERSION@', fullModVersion
+    replace '1.0.0.0', isDevRun ? config.forge_version : config.required_forge_version
     replaceIn 'BiomesOPlenty.java'
 }
 
@@ -61,6 +59,11 @@ jar {
 }
 
 processResources {
+    // rebuild the expanded files whenever a version changes
+    inputs.property 'mod_version', config.mod_version.toString()
+    inputs.property 'minecraft_version', config.minecraft_version.toString()
+    inputs.property 'build_number', config.build_number.toString()
+
     from(sourceSets.main.resources.srcDirs) {
         include '**/*.info'
         include '**/*.properties'
@@ -83,19 +86,32 @@ processResources {
 
 import groovy.io.FileType
 
-task changelog(type: JenkinsChangelog) {
+def changelogFile = file("build/libs/${archivesBaseName}-${project.version}-changelog.txt")
+
+// The release notes for this build: the section of CHANGELOG.md matching the full version.
+task changelog {
+    def source = file('CHANGELOG.md')
+    inputs.file source
+    outputs.file changelogFile
     outputs.upToDateWhen { false } // Refresh changelog for every build
-    def buildNumber = "${System.getenv().BUILD_NUMBER}"
 
-    serverRoot = 'http://ci.jenkins.minecraftforge.net/'
-    jobName = 'BiomesOPlenty'
-    authName = project.getProperty('forgeJenkinsUsername')
-    authPassword = project.getProperty('forgeJenkinsPassword')
-    targetBuild = buildNumber.toString()
-    output = 'build/libs/' + project.getName() + '-' + project.version + '-changelog.txt'
+    doLast {
+        def heading = /##\s+\[?${java.util.regex.Pattern.quote(fullModVersion)}\]?(\s.*)?/
+        def lines = source.readLines('UTF-8')
+        def start = lines.findIndexOf { it ==~ heading }
+        def section = start < 0 ? [] : lines.drop(start + 1)
+        // A section ends at the next version heading or at the link references
+        def end = section.findIndexOf { it.startsWith('## ') || it ==~ /\[[^\]]+\]:\s.*/ }
+        def text = (end < 0 ? section : section.take(end)).join('\n').trim()
+
+        if (!text) {
+            throw new GradleException("CHANGELOG.md needs a '## [${fullModVersion}]' section with at least one entry")
+        }
+
+        changelogFile.parentFile.mkdirs()
+        changelogFile.setText(text + '\n', 'UTF-8')
+    }
 }
-
-uploadArchives.dependsOn 'changelog'
 
 task sourcesJar(type: Jar) {
     from sourceSets.main.allJava
@@ -126,7 +142,6 @@ task apiJar(type: Jar) {
 }
 
 task listOutputs << {
-    //This is needed by the Groovy Postbuild to append labels for each build used in the changelog.
     println "Output files:"
     println "--------------------"
     def list = []
@@ -150,28 +165,21 @@ task listOutputs << {
 tasks.build.finalizedBy('listOutputs')
 
 artifacts {
-    archives changelog.output
+    archives(changelogFile) {
+        builtBy changelog
+    }
     archives sourcesJar
     archives deobfJar
     archives apiJar
 }
 
-curseforge {
-    apiKey = project.getProperty('curseApiKey')
-    project {
-        id = '220318'
-        changelog = file('build/libs/' + project.getName() + '-' + project.version + '-changelog.txt')
-        releaseType = 'beta'
-    }
-}
-
 uploadArchives {
     repositories {
         mavenDeployer {
-			if (project.hasProperty('forgeMavenPassword'))
+			if (System.getenv('MAVEN_USER') && System.getenv('MAVEN_PASSWORD'))
 			{
-				repository(url: "https://files.minecraftforge.net/maven/manage/upload") {
-					authentication(userName: project.getProperty('forgeMavenUsername'), password: project.getProperty('forgeMavenPassword'))
+				repository(url: "https://maven.minecraftforge.net/releases/") {
+					authentication(userName: System.getenv('MAVEN_USER'), password: System.getenv('MAVEN_PASSWORD'))
 				}
 			}
 			else
