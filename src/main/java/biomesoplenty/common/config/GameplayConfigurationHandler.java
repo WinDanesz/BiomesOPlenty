@@ -21,6 +21,7 @@ public class GameplayConfigurationHandler
     public static final String CONVENIENCE_SETTINGS = "Convenience Settings";
 
     public static boolean flowerDropsNeedShears;
+    public static boolean hotSpringWaterHeals;
 
     public static void init(File configFile)
     {
@@ -36,6 +37,7 @@ public class GameplayConfigurationHandler
         try
         {
             flowerDropsNeedShears = config.getBoolean("Flower Drops Need Shears", CONVENIENCE_SETTINGS, false, "Require shears to be used to collect flower drops.");
+            hotSpringWaterHeals = config.getBoolean("Hot Spring Water Heals", CONVENIENCE_SETTINGS, true, "Give entities standing in hot spring water the Regeneration effect.");
         }
         catch (Exception e)
         {

@@ -11,6 +11,7 @@ package biomesoplenty.common.fluids.blocks;
 import java.util.Random;
 
 import biomesoplenty.api.block.BOPBlocks;
+import biomesoplenty.common.config.GameplayConfigurationHandler;
 import net.minecraft.block.Block;
 import net.minecraft.block.material.MapColor;
 import net.minecraft.block.material.Material;
@@ -44,7 +45,7 @@ public class BlockHotSpringWaterFluid extends BlockFluidClassic
     @Override
     public void onEntityCollidedWithBlock(World world, BlockPos pos, IBlockState state, Entity entity)
     {
-        if (entity instanceof EntityLivingBase)
+        if (GameplayConfigurationHandler.hotSpringWaterHeals && entity instanceof EntityLivingBase)
         {
             EntityLivingBase living = (EntityLivingBase)entity;
             // Re-applying the effect every collision tick resets its timer and makes it heal far too quickly
