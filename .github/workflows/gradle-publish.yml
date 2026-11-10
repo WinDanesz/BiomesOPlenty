@@ -1,4 +1,5 @@
-name: Publish
+# The workflow name can't contain expressions, so it stays neutral and the job name says whether this run publishes.
+name: Build
 on:
   workflow_dispatch:
   pull_request:
@@ -7,9 +8,13 @@ on:
     branches: [BOP-1.12.x-7.0.x]
 env:
   # Only the real branch publishes. Pull requests and forks stop after the build.
+  # Job names can't read env, so the job name below repeats this condition; keep the two in sync.
   PUBLISH: ${{ github.repository == 'Glitchfiend/BiomesOPlenty' && github.event_name != 'pull_request' && github.ref == 'refs/heads/BOP-1.12.x-7.0.x' }}
+  # The release notes cover the commits since the previous build of the branch, or a pull request's commits
+  CHANGELOG_FROM: ${{ github.event.pull_request.base.sha || github.event.before }}
 jobs:
   build:
+    name: ${{ (github.repository == 'Glitchfiend/BiomesOPlenty' && github.event_name != 'pull_request' && github.ref == 'refs/heads/BOP-1.12.x-7.0.x') && 'Build and publish' || 'Build' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -17,11 +22,7 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v7
       with:
-        fetch-depth: 0 # The version check compares every new commit
-    - name: Check version
-      run: sh .github/scripts/check-version.sh "$BASE_COMMIT"
-      env:
-        BASE_COMMIT: ${{ github.event.pull_request.base.sha || github.event.before }}
+        fetch-depth: 0 # The version and release notes are computed from the git history
     - name: Set up JDK 8
       uses: actions/setup-java@v6
       with:
@@ -37,18 +38,30 @@ jobs:
     - name: Build
       id: build
       run: ./gradlew --no-daemon build
+    - name: Show release notes
+      run: |
+        cat build/release-info.properties
+        cat build/libs/*-changelog.txt
+    # A push with only build:, docs:, ci: and similar commits gets a version number but no release.
+    # A manual run always publishes.
     - name: Read version
       id: version
       if: env.PUBLISH == 'true'
       run: |
-        mod_version="$(sed -n 's/^mod_version=//p' build.properties | tr -d '\r')"
-        build_number="$(sed -n 's/^build_number=//p' build.properties | tr -d '\r')"
-        echo "number=${mod_version}.${build_number}" >> "$GITHUB_OUTPUT"
+        number="$(sed -n 's/^version=//p' build/release-info.properties)"
+        player_facing="$(sed -n 's/^player_facing=//p' build/release-info.properties)"
+        echo "number=${number}" >> "$GITHUB_OUTPUT"
+        if [ "$player_facing" = true ] || [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+          echo "release=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "release=false" >> "$GITHUB_OUTPUT"
+          echo "::notice::No player-facing commits since the last build, so ${number} isn't published"
+        fi
 
     # Each upload still runs if another fails, and any CurseForge or Modrinth failure fails the job.
     - name: CurseForge Publish
       id: curseforge
-      if: ${{ !cancelled() && env.PUBLISH == 'true' && steps.build.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.version.outputs.release == 'true' }}
       uses: Kir-Antipov/mc-publish@c23376546a97f5ba7984e94445da359459b14419 # v3.3.2
       with:
         curseforge-id: 220318
@@ -64,7 +77,7 @@ jobs:
         java: 8
     - name: Modrinth Publish
       id: modrinth
-      if: ${{ !cancelled() && env.PUBLISH == 'true' && steps.build.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.version.outputs.release == 'true' }}
       uses: Kir-Antipov/mc-publish@c23376546a97f5ba7984e94445da359459b14419 # v3.3.2
       with:
         modrinth-id: biomes-o-plenty
@@ -82,7 +95,7 @@ jobs:
         java: 8
     # Players get the mod from the two sites above, so a Maven problem only warns.
     - name: Maven Publish
-      if: ${{ !cancelled() && env.PUBLISH == 'true' && steps.build.outcome == 'success' }}
+      if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.version.outputs.release == 'true' }}
       run: ./gradlew --no-daemon uploadArchives
       continue-on-error: true
       env:

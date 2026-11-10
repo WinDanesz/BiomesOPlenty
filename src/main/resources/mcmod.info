@@ -1,11 +1,11 @@
 [{
     "modid": "biomesoplenty",
     "name": "Biomes O' Plenty",
-    "description": "Adds over 50 new biomes, blocks, and more!",
+    "description": "Adds over 50 new biomes, blocks, and more! This 1.12.2 version is maintained separately, so please report issues on Discord: ${support_url}",
     "version": "${mod_version}",
     "mcversion": "${minecraft_version}",
     "url": "http://mods.curse.com/mc-mods/minecraft/220318-biomes-o-plenty",
-    "authorList": ["Adubbz", "Amnet", "Cheeserolls", "Forstride", "ted80"],
+    "authorList": ["Adubbz", "Amnet", "Cheeserolls", "Forstride", "ted80", "WinDanesz"],
     "credits": "Tim Rurkowski, gamax92, GridMonkey, and many more",
     "logoFile": "assets/biomesoplenty/textures/gui/logo.png"
 }]

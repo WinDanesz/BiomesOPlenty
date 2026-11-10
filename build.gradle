@@ -29,7 +29,35 @@ group = "com.github.glitchfiend.biomesoplenty"
 version = config.mod_version
 archivesBaseName = "BiomesOPlenty"
 
-// every commit raises build_number in build.properties
+// Runs git and returns its trimmed output, or null if git is missing or the command fails
+def runGit = { List<String> args ->
+    def stdout = new ByteArrayOutputStream()
+    try {
+        def result = exec {
+            commandLine(['git'] + args)
+            standardOutput = stdout
+            errorOutput = new ByteArrayOutputStream()
+            ignoreExitValue = true
+        }
+        return result.exitValue == 0 ? stdout.toString('UTF-8').trim() : null
+    } catch (Exception ignored) {
+        return null
+    }
+}
+
+// The build number is version_base_build plus one for every commit on the branch
+// since version_base_commit, so nobody has to bump it by hand
+def baseCommit = config.version_base_commit.toString()
+def commitsSinceBase = runGit(['merge-base', '--is-ancestor', baseCommit, 'HEAD']) == null ? null :
+        runGit(['rev-list', '--count', '--first-parent', baseCommit + '..HEAD'])
+if (commitsSinceBase == null) {
+    if (System.getenv('CI')) {
+        throw new GradleException("Can't count the commits since ${baseCommit}, which CI needs for the version; check out the full history (fetch-depth: 0)")
+    }
+    logger.warn("Can't count the commits since ${baseCommit}, so this build uses build number 0")
+}
+config.build_number = (commitsSinceBase == null ? 0 : config.version_base_build.toString().toInteger() + commitsSinceBase.toInteger()).toString()
+
 def fullModVersion = "${config.mod_version}.${config.build_number}".toString()
 version = "${config.minecraft_version}-${fullModVersion}"
 
@@ -63,6 +91,7 @@ processResources {
     inputs.property 'mod_version', config.mod_version.toString()
     inputs.property 'minecraft_version', config.minecraft_version.toString()
     inputs.property 'build_number', config.build_number.toString()
+    inputs.property 'support_url', config.support_url.toString()
 
     from(sourceSets.main.resources.srcDirs) {
         include '**/*.info'
@@ -73,7 +102,8 @@ processResources {
             'modid': project.archivesBaseName,
             'mod_version': project.config.mod_version,
             'minecraft_version': project.config.minecraft_version,
-            'build_number': project.config.build_number
+            'build_number': project.config.build_number,
+            'support_url': project.config.support_url
         ])
     }
 
@@ -87,29 +117,46 @@ processResources {
 import groovy.io.FileType
 
 def changelogFile = file("build/libs/${archivesBaseName}-${project.version}-changelog.txt")
+def releaseInfoFile = file('build/release-info.properties')
 
-// The release notes for this build: the section of CHANGELOG.md matching the full version.
+// Release notes from the commit subjects since CHANGELOG_FROM (the previous commit CI built),
+// or from the latest commit when that is unset or unknown. Conventional commit prefixes pick
+// the Keep a Changelog heading; build:, docs:, ci: and similar commits aren't player-facing.
 task changelog {
-    def source = file('CHANGELOG.md')
-    inputs.file source
     outputs.file changelogFile
+    outputs.file releaseInfoFile
     outputs.upToDateWhen { false } // Refresh changelog for every build
 
     doLast {
-        def heading = /##\s+\[?${java.util.regex.Pattern.quote(fullModVersion)}\]?(\s.*)?/
-        def lines = source.readLines('UTF-8')
-        def start = lines.findIndexOf { it ==~ heading }
-        def section = start < 0 ? [] : lines.drop(start + 1)
-        // A section ends at the next version heading or at the link references
-        def end = section.findIndexOf { it.startsWith('## ') || it ==~ /\[[^\]]+\]:\s.*/ }
-        def text = (end < 0 ? section : section.take(end)).join('\n').trim()
+        def from = System.getenv('CHANGELOG_FROM')
+        def range = (from && runGit(['cat-file', '-e', from + '^{commit}']) != null) ? [from + '..HEAD'] : ['-1']
+        def subjects = (runGit(['log', '--no-merges', '--reverse', '--format=%s'] + range) ?: '').readLines()*.trim().findAll()
 
-        if (!text) {
-            throw new GradleException("CHANGELOG.md needs a '## [${fullModVersion}]' section with at least one entry")
+        def headings = [feat: 'Added', perf: 'Changed', revert: 'Changed', fix: 'Fixed']
+        def hidden = ['build', 'chore', 'ci', 'docs', 'refactor', 'style', 'test']
+        def sections = ['Added': [], 'Changed': [], 'Fixed': []]
+        subjects.each { subject ->
+            def match = subject =~ /^(\w+)(\([^)]*\))?!?:\s*(.+)$/
+            def type = match.matches() ? match.group(1).toLowerCase() : null
+            if (headings.containsKey(type)) {
+                sections[headings[type]] << match.group(3)
+            } else if (!hidden.contains(type)) {
+                sections['Changed'] << subject // no recognised prefix, e.g. translation pull requests
+            }
         }
 
+        def text = sections.findAll { it.value }.collect { heading, entries ->
+            "### ${heading}\n\n" + entries.collect { "- ${it}" }.join('\n')
+        }.join('\n\n')
+
+        // 1.12.2 support doesn't go to the current version's maintainers
+        def supportUrl = config.support_url.toString()
+        def footer = "---\n\nThis 1.12.2 version is maintained separately from current versions of Biomes O' Plenty. " +
+                "Please report 1.12.2 issues on Discord at [${supportUrl - ~/^https?:\/\//}](${supportUrl}), not on GitHub."
+
         changelogFile.parentFile.mkdirs()
-        changelogFile.setText(text + '\n', 'UTF-8')
+        changelogFile.setText((text ?: 'No player-facing changes.') + '\n\n' + footer + '\n', 'UTF-8')
+        releaseInfoFile.setText("version=${fullModVersion}\nplayer_facing=${text ? 'true' : 'false'}\n", 'UTF-8')
     }
 }
 
@@ -205,8 +252,8 @@ uploadArchives {
                     }
                 
                     issueManagement {
-                        system 'github'
-                        url 'https://github.com/Glitchfiend/BiomesOPlenty/issues'
+                        system 'Discord'
+                        url project.config.support_url
                     }
                 
                     licenses {
@@ -237,6 +284,11 @@ uploadArchives {
                             id 'ted80'
                             name 'ted80'
                             roles { role 'developer' }
+                        }
+                        developer {
+                            id 'WinDanesz'
+                            name 'WinDanesz'
+                            roles { role '1.12.2 maintainer' }
                         }
                     }
                 }

@@ -1,5 +1,8 @@
 <p align="center"><img src="http://i.imgur.com/uP9GBEb.png"></p>
 
+> [!IMPORTANT]
+> **Minecraft 1.12.2:** this version is maintained separately from current versions of Biomes O' Plenty. Please report 1.12.2 issues on Discord at https://discord.gg/wuSsgKwAKv, not on the GitHub issue tracker.
+
 **Biomes O' Plenty** is a **Minecraft mod** that adds **over 50 new biomes** to the overworld and Nether. From coral reefs to bamboo forests, all of our biomes are decorated with a slew of **new plants, trees, flowers, and more!**
 
 -----------------
