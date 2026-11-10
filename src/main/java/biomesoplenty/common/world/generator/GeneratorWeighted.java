@@ -8,7 +8,9 @@
 
 package biomesoplenty.common.world.generator;
 
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Random;
 
@@ -86,6 +88,11 @@ public class GeneratorWeighted extends BOPGeneratorBase
         }
     }
     
+    public Map<IGenerator, Integer> getWeights()
+    {
+        return Collections.unmodifiableMap(this.weights);
+    }
+
     public IGenerator getRandomGenerator(Random random)
     {
         if (this.weights.isEmpty())

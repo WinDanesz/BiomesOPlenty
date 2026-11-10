@@ -76,6 +76,11 @@ public abstract class BOPGeneratorBase extends WorldGenerator implements IGenera
     
     public abstract BlockPos getScatterY(World world, Random random, int x, int z);
     
+    public float getAmountPerChunk()
+    {
+        return this.amountPerChunk;
+    }
+
     public int getAmountToScatter(Random random)
     {
         int amount = MathHelper.floor(this.amountPerChunk);

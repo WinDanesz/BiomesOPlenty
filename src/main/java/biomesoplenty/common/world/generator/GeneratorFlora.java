@@ -26,7 +26,6 @@ import biomesoplenty.common.block.BlockBOPPlant;
 import biomesoplenty.common.util.biome.GeneratorUtils.ScatterYMethod;
 import biomesoplenty.common.util.block.BlockQuery.BlockQueryMaterial;
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockBush;
 import net.minecraft.block.BlockFlower;
 import net.minecraft.block.BlockLeaves;
 import net.minecraft.block.BlockNewLeaf;
@@ -108,31 +107,37 @@ public class GeneratorFlora extends GeneratorReplacing
         this.generationAttempts = generationAttempts;
     }
 
+    public IBlockState getWith()
+    {
+        return this.with;
+    }
+
+    // whether this generator's block could be placed at exactly this position
+    public boolean canPlaceAt(World world, BlockPos pos)
+    {
+        if (!this.placeOn.matches(world, pos.down()) || !this.replace.matches(world, pos) || pos.getY() >= 255)
+        {
+            return false;
+        }
+
+        Block block = this.with.getBlock();
+        if (block instanceof BlockBOPDecoration)
+        {
+            return ((BlockBOPDecoration)block).canBlockStay(world, pos, this.with);
+        }
+        return block.canPlaceBlockAt(world, pos);
+    }
+
     @Override
     public boolean generate(World world, Random random, BlockPos pos)
     {
-        Block block = this.with.getBlock();
-        
         for (int i = 0; i < this.generationAttempts; ++i)
         {
             BlockPos genPos = pos.add(random.nextInt(8) - random.nextInt(8), random.nextInt(4) - random.nextInt(4), random.nextInt(8) - random.nextInt(8));
 
-            if (this.placeOn.matches(world, genPos.down()) && this.replace.matches(world, genPos) && genPos.getY() < 255)
+            if (this.canPlaceAt(world, genPos))
             {
-                boolean canStay;
-                if (block instanceof BlockBOPDecoration)
-                {
-                    canStay = ((BlockBOPDecoration)block).canBlockStay(world, genPos, this.with);
-                } else if (block instanceof BlockBush) {
-                    canStay = block.canPlaceBlockAt(world, genPos);
-                } else {
-                    canStay = block.canPlaceBlockAt(world, genPos);
-                }
-                
-                if (canStay)
-                {
-                    world.setBlockState(genPos, this.with, 2);
-                }
+                world.setBlockState(genPos, this.with, 2);
             }
         }
 

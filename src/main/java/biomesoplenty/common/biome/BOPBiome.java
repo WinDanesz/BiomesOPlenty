@@ -14,14 +14,21 @@ import biomesoplenty.api.config.IConfigObj;
 import biomesoplenty.api.enums.BOPClimates;
 import biomesoplenty.api.generation.GeneratorStage;
 import biomesoplenty.api.generation.IGenerator;
+import biomesoplenty.common.block.BlockBOPFlower;
 import biomesoplenty.common.init.ModBiomes;
 import biomesoplenty.common.world.GenerationManager;
+import biomesoplenty.common.world.generator.GeneratorFlora;
+import biomesoplenty.common.world.generator.GeneratorGrass;
+import biomesoplenty.common.world.generator.GeneratorWeighted;
 import biomesoplenty.core.BiomesOPlenty;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockFlower;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLiving;
 import net.minecraft.entity.EnumCreatureType;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.World;
 import net.minecraft.world.biome.Biome;
 import net.minecraftforge.fml.common.registry.ForgeRegistries;
 
@@ -241,6 +248,82 @@ public abstract class BOPBiome extends Biome implements IExtendedBiome
     public void clearWeights()
     {
         this.weightMap.clear();
+    }
+
+    /**
+     * Called when grass is bonemealed. Vanilla/Forge only know about the flowers registered via addFlower (dandelions
+     * and poppies by default), so instead pick from the flowers this biome actually generates, weighted by how
+     * frequently each one is scattered during world generation.
+     */
+    @Override
+    public void plantFlower(World world, Random rand, BlockPos pos)
+    {
+        List<GeneratorFlora> candidates = new ArrayList<GeneratorFlora>();
+        List<Float> weights = new ArrayList<Float>();
+
+        for (IGenerator generator : this.generationManager.getGeneratorsForStage(GeneratorStage.FLOWERS))
+        {
+            collectPlantableFlowers(generator, 1.0F, world, pos, candidates, weights);
+        }
+
+        float totalWeight = 0.0F;
+        for (float weight : weights) {totalWeight += weight;}
+
+        if (candidates.isEmpty() || totalWeight <= 0.0F)
+        {
+            // this biome doesn't generate any flowers which can grow here - fall back to the default behaviour
+            super.plantFlower(world, rand, pos);
+            return;
+        }
+
+        float target = rand.nextFloat() * totalWeight;
+        GeneratorFlora chosen = candidates.get(candidates.size() - 1);
+        for (int i = 0; i < candidates.size(); i++)
+        {
+            target -= weights.get(i);
+            if (target < 0.0F)
+            {
+                chosen = candidates.get(i);
+                break;
+            }
+        }
+
+        world.setBlockState(pos, chosen.getWith(), 3);
+    }
+
+    private static void collectPlantableFlowers(IGenerator generator, float multiplier, World world, BlockPos pos, List<GeneratorFlora> candidates, List<Float> weights)
+    {
+        if (generator instanceof GeneratorWeighted)
+        {
+            GeneratorWeighted weighted = (GeneratorWeighted)generator;
+            Map<IGenerator, Integer> childWeights = weighted.getWeights();
+            int totalChildWeight = 0;
+            for (int weight : childWeights.values()) {totalChildWeight += weight;}
+            if (totalChildWeight <= 0) {return;}
+
+            // each scatter of a weighted generator scatters one randomly chosen child
+            float childMultiplier = multiplier * weighted.getAmountPerChunk() / totalChildWeight;
+            for (Map.Entry<IGenerator, Integer> entry : childWeights.entrySet())
+            {
+                collectPlantableFlowers(entry.getKey(), childMultiplier * entry.getValue(), world, pos, candidates, weights);
+            }
+        }
+        else if (generator instanceof GeneratorFlora && !(generator instanceof GeneratorGrass))
+        {
+            GeneratorFlora flora = (GeneratorFlora)generator;
+            Block block = flora.getWith().getBlock();
+
+            // the flowers stage also contains things like fire, thorns and dead grass - only pick actual flowers
+            if (!(block instanceof BlockFlower || block instanceof BlockBOPFlower)) {return;}
+            if (!flora.canPlaceAt(world, pos)) {return;}
+
+            float weight = multiplier * flora.getAmountPerChunk();
+            if (weight > 0.0F)
+            {
+                candidates.add(flora);
+                weights.add(weight);
+            }
+        }
     }
 
     // whether or not a biome essence item corresponding to this biome should be able to drop from biome blocks
