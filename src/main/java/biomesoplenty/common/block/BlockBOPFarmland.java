@@ -31,6 +31,7 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemBlock;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.EnumFacing;
+import net.minecraft.util.math.AxisAlignedBB;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.RayTraceResult;
 import net.minecraft.world.IBlockAccess;
@@ -127,7 +128,7 @@ public class BlockBOPFarmland extends BlockFarmland implements IBOPBlock
             }
             else if (!this.hasCrops(world, pos))
             {
-                world.setBlockState(pos, this.getDirtBlockState(world.getBlockState(pos)));
+                this.convertToDirt(world, pos);
             }
         }
         else if (i < 7)
@@ -160,7 +161,7 @@ public class BlockBOPFarmland extends BlockFarmland implements IBOPBlock
     {
         if (world.getBlockState(pos.up()).getMaterial().isSolid())
         {
-            world.setBlockState(pos, this.getDirtBlockState(world.getBlockState(pos)));
+            this.convertToDirt(world, pos);
         }
     }
 
@@ -176,7 +177,7 @@ public class BlockBOPFarmland extends BlockFarmland implements IBOPBlock
                     return;
                 }
 
-                world.setBlockState(pos, this.getDirtBlockState(world.getBlockState(pos)));
+                this.convertToDirt(world, pos);
             }
         }
     }
@@ -214,6 +215,26 @@ public class BlockBOPFarmland extends BlockFarmland implements IBOPBlock
         }
 
         return super.canSustainPlant(state, world, pos, direction, plantable);
+    }
+
+    /**
+     * Turns this farmland into dirt and lifts any entities that would otherwise be stuck inside the
+     * now-taller block (MC-104259).
+     */
+    private void convertToDirt(World world, BlockPos pos)
+    {
+        IBlockState dirt = this.getDirtBlockState(world.getBlockState(pos));
+        world.setBlockState(pos, dirt);
+
+        AxisAlignedBB dirtBox = dirt.getCollisionBoundingBox(world, pos);
+        if (dirtBox == null) return;
+        dirtBox = dirtBox.offset(pos);
+
+        for (Entity entity : world.getEntitiesWithinAABBExcludingEntity(null, dirtBox))
+        {
+            double lift = Math.min(dirtBox.maxY - dirtBox.minY, dirtBox.maxY - entity.getEntityBoundingBox().minY);
+            entity.setPositionAndUpdate(entity.posX, entity.posY + lift + 0.001D, entity.posZ);
+        }
     }
 
     public IBlockState getDirtBlockState(IBlockState state)
