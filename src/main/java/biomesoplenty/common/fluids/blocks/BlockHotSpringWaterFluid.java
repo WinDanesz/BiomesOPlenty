@@ -46,7 +46,12 @@ public class BlockHotSpringWaterFluid extends BlockFluidClassic
     {
         if (entity instanceof EntityLivingBase)
         {
-            ((EntityLivingBase)entity).addPotionEffect(new PotionEffect(MobEffects.REGENERATION, 100));
+            EntityLivingBase living = (EntityLivingBase)entity;
+            // Re-applying the effect every collision tick resets its timer and makes it heal far too quickly
+            if (living.getActivePotionEffect(MobEffects.REGENERATION) == null)
+            {
+                living.addPotionEffect(new PotionEffect(MobEffects.REGENERATION, 100));
+            }
         }
     }
     
